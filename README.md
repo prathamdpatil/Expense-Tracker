@@ -52,3 +52,11 @@ VALUES
 (5, 'Health'),
 (3, 'Shopping'),
 (2, 'Transport');
+
+.env file
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD= 
+DB_NAME=expense_tracker
+DB_PORT=3306
+
