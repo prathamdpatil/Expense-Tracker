@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import "./App.css";
 import ExpenseTracker from "./components/ExpenseTracker";
+import { ToastContainer, toast } from 'react-toastify';
 import FilterPanel from "./components/FilterPanel";
-import { API_URL, USER_API_URL, CATEGORY_API_URL, TOPDAYS_API_URL, MONTHCHANGE_API_URL, NEXTMONTH_API_URL } from "./assets/url";
+import UserStatsModal  from "./components/UserStatsModal";
+import ExpenseTable from "./components/ExpenseTable";
+import ConfirmModal from "./components/ConfirmModal";
+import { API_URL, USER_API_URL, CATEGORY_API_URL,STATS_ALL_USERS_API } from "./assets/url";
 
 
 const App = () => {
@@ -16,74 +19,63 @@ const App = () => {
     const [selectedExpenses, setSelectedExpenses] = useState([]);
     const [editingRowId, setEditingRowId] = useState(null);
     const [editedData, setEditedData] = useState({});
-
-    const [topThreeDays, setTopThreeDays] = useState([]);
-    const [monthChange, setMonthChange] = useState(null);
-    const [nextMonthPrediction, setNextMonthPrediction] = useState(null);
-    
-    const [selectedUser, setSelectedUser] = useState(null);
+    const [updated,setUpdated]= useState(false);
     const [showModal, setShowModal] = useState(false);
+    const [userStats, setUserStats] = useState([]);
+    const [showConfirm, setShowConfirm] = useState(false);
 
-
-  
 
     useEffect(() => {
-        axios.get(USER_API_URL).then((res) => setUsers(res.data));
-        axios.get(CATEGORY_API_URL).then((res) => setCategories(res.data));
-        fetchExpenses();
-    }, []);
-
-
-    const fetchExpenses = async () => {
-      try {
-          const res = await axios.get(API_URL);
-          setExpenses(res.data);
-          setFilteredExpenses(res.data);
-      } catch (error) {
-          console.error("Error fetching expenses:", error);
-      }
-  };
-
+        axios.get(API_URL).then((res)=> {setExpenses(res.data);
+            setFilteredExpenses(res.data)}).catch(err => toast.error(err.response)).finally(()=>{
+                setUpdated(false)
+            })
+        axios.get(USER_API_URL).then((res) => setUsers(res.data)).catch(err => toast.error(err.response))
+        axios.get(CATEGORY_API_URL).then((res) => setCategories(res.data)).catch(err => toast.error(err.response))
+        
+    }, [updated]);
   
-    const applyFilters = (filterUser, filterCategory, startDate, endDate) => {
-        const filtered = expenses.filter((expense) => {
-            const expenseDate = new Date(expense.date);
-            return (
-                (filterUser ? expense.user_id.toString() === filterUser : true) &&
-                (filterCategory ? expense.category.toLowerCase() === filterCategory.toLowerCase() : true) &&
-                (startDate && endDate ? (expenseDate >= startDate && expenseDate <= endDate) : true)
-            );
-        });
-        setFilteredExpenses(filtered);
-    };
+  const applyFilters = (filterUser, filterCategory, startDate, endDate) => {
+    const filtered = expenses.filter((expense) => {
+        const expenseDate = new Date(expense.date);
+        
+        return (
+            (filterUser ? expense.user_id.toString() === filterUser : true) &&
+            (filterCategory ? expense.category.toString() === filterCategory.toString() : true) &&
+            (startDate && endDate ? (expenseDate >= startDate && expenseDate <= endDate) : true)
+        );
+    });
+    setFilteredExpenses(filtered);
+};
 
     const reSetFilterExpense=()=>{
       setFilteredExpenses(expenses);
     }
 
     const handleDeleteSelected = async () => {
-      if (selectedExpenses.length === 0) {
-          alert("Please select at least one expense to delete.");
+        if (selectedExpenses.length === 0) {
+          toast.error("Please select at least one expense to delete.");
           return;
-      }
-  
-      if (!window.confirm("Are you sure you want to delete the selected expenses?")) {
-          return;
-      }
-  
-      try {
-          await axios.delete(`${API_URL}/bulk`, {
-              data: { ids: selectedExpenses },
+        }
+        
+        setShowConfirm(true);
+      };
+      
+      const confirmDelete = async () => {
+        try {
+          const response = await axios.delete(`${API_URL}/bulk`, {
+            data: { ids: selectedExpenses },
           });
-  
+      
           setSelectedExpenses([]);
-          fetchExpenses();
-      } catch (error) {
-          console.error("Error deleting expenses:", error);
-      }
-  };
-  
-
+          setUpdated(true);
+          toast.success(response.data.message);
+        } catch (error) {
+          toast.error("Failed to delete expenses. Please try again.");
+        }
+        setShowConfirm(false);
+      };
+    
     const handleEdit = (expense) => {
         setEditingRowId(expense.id);
         setEditedData({
@@ -93,11 +85,6 @@ const App = () => {
             date: new Date(expense.date),
         });
     };
-    const handleUserClick = (userId) => {
-      setSelectedUser(userId);
-      setShowModal(true);
-  };
-  
 
     const handleChange = (e, field) => {
         setEditedData((prevData) => ({
@@ -107,182 +94,109 @@ const App = () => {
     };
 
     const handleSave = async (id) => {
+        const existingExpense = expenses.find(exp => exp.id === id);
+        if (!existingExpense) {
+            toast.error("Expense not found.");
+            return;
+        }
+    
         try {
-            await axios.put(`${API_URL}/${id}`, {
-                user_id: editedData.user_id,
-                category: editedData.category,
-                amount: editedData.amount,
-                date: editedData.date.toISOString().split("T")[0]
-            });
-            setEditingRowId(null);
-            fetchExpenses();  
+            let updatedExpense = {
+                user_id: editedData.user_id !== undefined ? Number(editedData.user_id) : existingExpense.user_id,
+                category: editedData.category !== undefined ? String(editedData.category) : String(existingExpense.category),
+                amount: editedData.amount !== undefined ? Number(editedData.amount) : existingExpense.amount,
+                date: editedData.date 
+                    ? new Date(editedData.date).toLocaleDateString("en-CA") // ✅ Fix: Keep date format consistent (YYYY-MM-DD)
+                    : existingExpense.date, 
+            };
+    
+            let response = await axios.put(`${API_URL}/${id}`, updatedExpense);
+    
+            if (response.status === 200) {  
+                setEditingRowId(null);
+                setUpdated(true);
+                toast.success(response.data.message);
+            }
         } catch (error) {
             console.error("Error updating expense:", error);
+    
+            if (error.response) {
+                toast.error(error.response.data.message);
+            } else {
+                toast.error("Failed to update expense. Please try again.");
+            }
         }
     };
+    
+    
     const handleSelectAll = (e) => {
       if (e.target.checked) {
           setSelectedExpenses(filteredExpenses.map((expense) => expense.id));
       } else {
           setSelectedExpenses([]);
       }
-  };
-  const handleCheckboxChange = (id) => {
+    };
+
+   const handleCheckboxChange = (id) => {
     setSelectedExpenses((prevSelected) =>
         prevSelected.includes(id)
             ? prevSelected.filter((expenseId) => expenseId !== id)
             : [...prevSelected, id] 
     );
-};
+    };
 
-useEffect(() => {
-  async function getStat() {
-      if (!selectedUser) return;
+    const fetchUserStats = async () => {
+        try {
+            const response = await axios.get(STATS_ALL_USERS_API);
+            setUserStats(response.data);
+            setShowModal(true);
+        } catch (error) {
+            console.error("Error fetching user statistics:", error);
+            toast.error("Failed to fetch user statistics.");
+        }
+    };
 
-      try {
-          const [topDaysRes, monthChangeRes, nextMonthRes] = await Promise.all([
-              axios.get(`${TOPDAYS_API_URL}${selectedUser}`),
-              axios.get(`${MONTHCHANGE_API_URL}${selectedUser}`),
-              axios.get(`${NEXTMONTH_API_URL}${selectedUser}`)
-          ]);
-
-          console.log("Top 3 Days:", topDaysRes.data);
-          console.log("Monthly Change:", monthChangeRes.data);
-          console.log("Next Month Prediction:", nextMonthRes.data);
-
-          setTopThreeDays(Array.isArray(topDaysRes.data) ? topDaysRes.data : []);
-          setMonthChange(monthChangeRes.data);
-          setNextMonthPrediction(nextMonthRes.data);
-      } catch (error) {
-          console.error("Error fetching statistics:", error);
-          setTopThreeDays([]);
-          setMonthChange(null);
-          setNextMonthPrediction(null);
-      }
-  }
-
-  getStat();
-}, [selectedUser]);
-
-
-
-
-const getUserName=()=>{
-  let name = users.find(u => u.id === selectedUser)?.name
-  return name;
-}
     return (
         <div className="container">
-            
             <ExpenseTracker
                users={users}
                categories={categories}
-               fetchExpenses={fetchExpenses}
+               setUpdated={setUpdated}
             />
-           
            <FilterPanel
             users={users}
             applyFilters={applyFilters}
             reSetFilterExpense={reSetFilterExpense}
             categories={categories}
            />
-           
-            <div className="action-buttons">
-                <button onClick={handleDeleteSelected} className="delete-btn" disabled={selectedExpenses.length === 0}>
-                    Delete Selected
-                </button>
-            </div>
-            <div className="expense-container">
-                <table className="expense-table">
-                    <thead>
-                        <tr>
-                            <th className="select-column"><input type="checkbox" onChange={handleSelectAll} checked={selectedExpenses.length === filteredExpenses.length && filteredExpenses.length > 0} /></th>
-                            <th>User</th>
-                            <th>Category</th>
-                            <th>Amount</th>
-                            <th>Date (DD/MM/YYYY)</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {filteredExpenses.map((expense) => (
-                            <tr key={expense.id}>
-                                 <td>
-                                    <input type="checkbox" checked={selectedExpenses.includes(expense.id)} onChange={() => handleCheckboxChange(expense.id)} />
-                                </td>
-                                
-                                <td>{editingRowId === expense.id ? <select value={editedData.user_id} onChange={(e) => handleChange(e, "user_id")}>{users.map((u) => (<option key={u.x} value={u.id}>{u.name}</option>))}</select> :  <span className="clickable-user" onClick={() => handleUserClick(expense.user_id)}>{users.find((u) => u.id == expense.user_id)?.name || "Unknown"}</span>}</td>
-                                <td>{editingRowId === expense.id ? <select value={editedData.category} onChange={(e) => handleChange(e, "category")}>{categories.map((cat) => (<option key={cat.id} value={cat.name}>{cat.name}</option>))}</select> : expense.category}</td>
-                                <td>{editingRowId === expense.id ? <input type="number" value={editedData.amount} onChange={(e) => handleChange(e, "amount")} /> : `₹${expense.amount}`}</td>
-                                <td>
-                                      {editingRowId === expense.id ? (
-                                          <DatePicker 
-                                              selected={editedData.date} 
-                                              onChange={(date) => setEditedData({ ...editedData, date })} 
-                                              dateFormat="dd/MM/yyyy"
-                                          />
-                                      ) : (
-                                          new Date(expense.date).toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" })
-                                      )}
-                                </td>                                
-                                <td>{editingRowId === expense.id ? 
-                                <div className="save-cancel-btn">
-                                  <button onClick={() => handleSave(expense.id)} className="save-btn">Save</button>
-                                  <button onClick={() => setEditingRowId(null)} className="cancel-btn">Cancel</button>
-                                </div> : <button onClick={() => handleEdit(expense)} className="edit-btn">Edit</button>}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                  </table>
-
-                {showModal && selectedUser && (
-                          <div className="modal">
-                              <div className="modal-content">
-                                  <span className="close-btn" onClick={() => setShowModal(false)}>&times;</span>
-                                  
-                                  <h2>Statistics for {getUserName()}</h2>
-
-                                  <div className="stat-section">
-                          <h3>Top 3 Expenditure Days</h3>
-                          <ul>
-                              {Array.isArray(topThreeDays) && topThreeDays.length > 0 ? (
-                                  topThreeDays.map(({ date, total_spent }) => (
-                                      <li key={date}>
-                                          <strong>{new Date(date).toLocaleDateString("en-GB")}</strong>: ₹{parseFloat(total_spent).toFixed(2)}
-                                      </li>
-                                  ))
-                              ) : (
-                                  <p>No data available</p>
-                              )}
-                          </ul>
-                      </div>
-
-                                  <div className="stat-section">
-                                      <h3>Monthly Expenditure Change</h3>
-                                      <p className="percentage-change">
-                                          {(monthChange && monthChange.percentage_change !== null)
-                                              ? `${parseFloat(monthChange.percentage_change).toFixed(2)}%`
-                                              : "No data available"}
-                                      </p>
-                                  </div>
-
-                                  <div className="stat-section">
-                                      <h3>Predicted Next Month's Expenditure</h3>
-                                      <p className="predicted-exp">
-                                          {nextMonthPrediction && nextMonthPrediction.predicted_next_month !== null
-                                              ? `₹${parseFloat(nextMonthPrediction.predicted_next_month).toFixed(2)}`
-                                              : "No data available"}
-                                      </p>
-                                  </div>
-
-
-        </div>
-    </div>
-)}
-
-
-</div>
-</div>
+           <ConfirmModal
+            show={showConfirm}
+            onConfirm={confirmDelete}
+            onCancel={() => setShowConfirm(false)}
+            message="Are you sure you want to delete the selected expenses?"
+            />
+           <ExpenseTable
+                    filteredExpenses={filteredExpenses}
+                    selectedExpenses={selectedExpenses}
+                    handleSelectAll={handleSelectAll}
+                    handleCheckboxChange={handleCheckboxChange}
+                    editingRowId={editingRowId}
+                    editedData={editedData}
+                    handleChange={handleChange}
+                    handleSave={handleSave}
+                    handleEdit={handleEdit}
+                    setEditingRowId={setEditingRowId}
+                    users={users}
+                    categories={categories}
+                    handleDeleteSelected={handleDeleteSelected}
+                    fetchUserStats={fetchUserStats}
+            />
+           <UserStatsModal 
+                showModal={showModal} 
+                setShowModal={setShowModal} 
+                userStats={userStats} 
+            />
+   </div>
 );
 };
 

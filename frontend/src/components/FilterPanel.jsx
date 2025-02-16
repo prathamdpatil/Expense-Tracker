@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import DatePicker from "react-datepicker";  
 
 const FilterPanel =({users, applyFilters, reSetFilterExpense, categories})=>{
@@ -30,7 +29,7 @@ const FilterPanel =({users, applyFilters, reSetFilterExpense, categories})=>{
         <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
             <option value="">Filter by Category</option>
             {categories.map((cat) => (
-                <option key={cat.id} value={cat.name}>{cat.name}</option>
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
             ))}
         </select>
 
