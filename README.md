@@ -24,7 +24,7 @@ CREATE TABLE Categories (
 CREATE TABLE Expenses (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT,
-    category_id INT,
+    category INT,
     amount DECIMAL(10, 2),
     date DATE,
     description TEXT,
